@@ -1,5 +1,5 @@
-- 👋 Personal Brainer, Memeticist, Educator, Voice
-- 👀 Helping humans and computers collaborate and achieve symbiosis
+- 👋 Memeticist, Personal Brainer, Educator, Voice
+- 👀 Helping humans with RI and computers with AI collaborate and achieve symbiosis
 - 🌱 Student of Computer Science at Aalto University
 - 💞️ Looking to collaborate on memetics, cognitive science, RI, AI, HCI
 - 📫 RW.fi, @ReidarWasenius, +358 208 358 358
