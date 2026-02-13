@@ -71,12 +71,10 @@
 
       <button id="btnZoomIn" title="Zoom in (+)">Zoom +</button>
       <button id="btnZoomOut" title="Zoom out (-)">Zoom −</button>
-      <button id="btnZoomReset" title="Reset to overview zoom (0)">Zoom 0</button>
 
       <button id="btnOrigin" title="Center on Origin plot (overview zoom)">Origin</button>
       <button id="btnHome" title="Center on Home plot (overview zoom)">Home</button>
       <button id="btnActivity" title="Center on most active plot in most active 10×10 region (pixel mode)">Activity</button>
-      <button id="btnPixels" title="One-shot: 1 device pixel per tile (keeps current center)">Pixels</button>
 
       <button id="btnExportView" title="Export current view as PNG">Export View</button>
       <button id="btnExport" title="Export painted tiles as JSON">Export</button>
@@ -94,7 +92,7 @@
 
   // ---------------- Constants ----------------
   const PLOT_SIZE = 1000;
-  const ORIGIN_PLOT = { x: 0, y: 0 };
+  const ORIGIN_PLOT = { x: 1, y: 1 };
   const HOME_PLOT   = { x: 4, y: 4 };
   const DEFAULT_ACTIVITY_FALLBACK = { x: 2, y: 2 };
   const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -114,12 +112,10 @@
 
   const btnZoomIn = document.getElementById('btnZoomIn');
   const btnZoomOut = document.getElementById('btnZoomOut');
-  const btnZoomReset = document.getElementById('btnZoomReset');
 
   const btnOrigin = document.getElementById('btnOrigin');
   const btnHome = document.getElementById('btnHome');
   const btnActivity = document.getElementById('btnActivity');
-  const btnPixels = document.getElementById('btnPixels');
 
   const btnExportView = document.getElementById('btnExportView');
   const btnExport = document.getElementById('btnExport');
@@ -130,6 +126,8 @@
   const DPR = () => Math.max(1, window.devicePixelRatio || 1);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const key = (tx, ty) => `${tx},${ty}`;
+  const plotCoordToGrid = (plotCoord) => plotCoord > 0 ? plotCoord - 1 : plotCoord;
+  const gridToPlotCoord = (gridCoord) => gridCoord >= 0 ? gridCoord + 1 : gridCoord;
 
   function hslToHex(h, s, l){
     s/=100; l/=100;
@@ -233,9 +231,18 @@
   }
   function goToPlot(plotX, plotY, forceOverviewZoom){
     if (forceOverviewZoom) setOverviewZoom();
-    const wx = plotX*PLOT_SIZE + PLOT_SIZE/2;
-    const wy = plotY*PLOT_SIZE + PLOT_SIZE/2;
+    const gx = plotCoordToGrid(plotX);
+    const gy = plotCoordToGrid(plotY);
+    const wx = gx*PLOT_SIZE + PLOT_SIZE/2;
+    const wy = gy*PLOT_SIZE + PLOT_SIZE/2;
     centerOnWorld(wx, wy);
+  }
+  function goToHomeFitHeight(){
+    state.pixelMode = false;
+    state.pxPerTile = state.viewH / PLOT_SIZE;
+    goToPlot(HOME_PLOT.x, HOME_PLOT.y, false);
+    requestDraw();
+    saveDebounced();
   }
 
   // ---------------- Persistence ----------------
@@ -329,8 +336,8 @@
 
   // ---------------- Painting restriction ----------------
   function isWithinHome(tx, ty){
-    const x0 = HOME_PLOT.x * PLOT_SIZE;
-    const y0 = HOME_PLOT.y * PLOT_SIZE;
+    const x0 = plotCoordToGrid(HOME_PLOT.x) * PLOT_SIZE;
+    const y0 = plotCoordToGrid(HOME_PLOT.y) * PLOT_SIZE;
     return tx >= x0 && tx < x0 + PLOT_SIZE && ty >= y0 && ty < y0 + PLOT_SIZE;
   }
   function paintAtScreen(sx, sy){
@@ -493,17 +500,7 @@
 
   // ---------------- Buttons ----------------
   btnOrigin.addEventListener('click', () => goToPlot(ORIGIN_PLOT.x, ORIGIN_PLOT.y, true), { passive: true });
-  btnHome.addEventListener('click',   () => goToPlot(HOME_PLOT.x, HOME_PLOT.y, true),     { passive: true });
-
-  btnPixels.addEventListener('click', () => {
-    const centerWorld = screenToWorld(state.viewW*0.5, state.viewH*0.5);
-    state.pixelMode = true;
-    clampPxPerTile();
-    centerOnWorld(centerWorld.x, centerWorld.y);
-    ctx.imageSmoothingEnabled = false;
-    requestDraw();
-    saveDebounced();
-  }, { passive: true });
+  btnHome.addEventListener('click', goToHomeFitHeight, { passive: true });
 
   btnActivity.addEventListener('click', async () => {
     const target = await fetchHotRegionAndPlot().catch(() => null) || DEFAULT_ACTIVITY_FALLBACK;
@@ -528,7 +525,6 @@
   }
   btnZoomIn.addEventListener('click', () => zoomAboutCenter(1.25), { passive: true });
   btnZoomOut.addEventListener('click', () => zoomAboutCenter(1/1.25), { passive: true });
-  btnZoomReset.addEventListener('click', () => { setOverviewZoom(); requestDraw(); saveDebounced(); }, { passive: true });
 
   btnExport.addEventListener('click', () => {
     const payload = { tiles: Array.from(tiles.entries()), meta: { homePlot: HOME_PLOT, plotSize: PLOT_SIZE } };
@@ -579,11 +575,9 @@
     if (e.target && (e.target.tagName === 'INPUT')) return;
     if (e.key === '+' || e.key === '=') zoomAboutCenter(1.25);
     else if (e.key === '-' || e.key === '_') zoomAboutCenter(1/1.25);
-    else if (e.key === '0') { setOverviewZoom(); requestDraw(); }
-    else if (e.key.toLowerCase() === 'h') goToPlot(HOME_PLOT.x, HOME_PLOT.y, true);
+    else if (e.key.toLowerCase() === 'h') goToHomeFitHeight();
     else if (e.key.toLowerCase() === 'o') goToPlot(ORIGIN_PLOT.x, ORIGIN_PLOT.y, true);
     else if (e.key.toLowerCase() === 'a') btnActivity.click();
-    else if (e.key.toLowerCase() === 'p') btnPixels.click();
   });
 
   // ---------------- Activity heuristic ----------------
@@ -628,7 +622,7 @@
     if (!best || best.plots.length === 0) return { x: DEFAULT_ACTIVITY_FALLBACK.x, y: DEFAULT_ACTIVITY_FALLBACK.y };
 
     best.plots.sort((a,b)=>b.c-a.c);
-    return { x: best.plots[0].px, y: best.plots[0].py };
+    return { x: gridToPlotCoord(best.plots[0].px), y: gridToPlotCoord(best.plots[0].py) };
   }
 
   // ---------------- Rendering ----------------
@@ -705,8 +699,8 @@
   }
 
   function drawHomeOutline(){
-    const x0 = HOME_PLOT.x*PLOT_SIZE;
-    const y0 = HOME_PLOT.y*PLOT_SIZE;
+    const x0 = plotCoordToGrid(HOME_PLOT.x)*PLOT_SIZE;
+    const y0 = plotCoordToGrid(HOME_PLOT.y)*PLOT_SIZE;
     const tl = worldToScreen(x0, y0);
     const w = PLOT_SIZE * state.pxPerTile;
 
@@ -758,7 +752,7 @@
       Math.round(hp.rect.h)
     );
 
-    const label = `Plot (${hp.px}, ${hp.py})`;
+    const label = `Plot (${gridToPlotCoord(hp.px)}, ${gridToPlotCoord(hp.py)})`;
     ctx.font = '12px system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif';
     const pad = 6;
     const tw = Math.ceil(ctx.measureText(label).width);
@@ -789,19 +783,9 @@
     ctx.restore();
   }
 
-  // ---------------- Zoom buttons and Origin/Home/Activity/Pixels ----------------
+  // ---------------- Zoom buttons and Origin/Home/Activity ----------------
   btnOrigin.addEventListener('click', () => goToPlot(ORIGIN_PLOT.x, ORIGIN_PLOT.y, true), { passive: true });
-  btnHome.addEventListener('click',   () => goToPlot(HOME_PLOT.x, HOME_PLOT.y, true),     { passive: true });
-
-  btnPixels.addEventListener('click', () => {
-    const centerWorld = screenToWorld(state.viewW*0.5, state.viewH*0.5);
-    state.pixelMode = true;
-    clampPxPerTile();
-    centerOnWorld(centerWorld.x, centerWorld.y);
-    ctx.imageSmoothingEnabled = false;
-    requestDraw();
-    saveDebounced();
-  }, { passive: true });
+  btnHome.addEventListener('click', goToHomeFitHeight, { passive: true });
 
   btnActivity.addEventListener('click', async () => {
     const t = await fetchHotRegionAndPlot().catch(() => null) || DEFAULT_ACTIVITY_FALLBACK;
